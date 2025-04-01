@@ -1,0 +1,57 @@
+#!/bin/zsh 
+
+logFile="myLog_${1}"
+errLog="myErr_${1}"
+
+touch ${logFile}
+touch ${errLog}
+
+if [[ -z $1 ]]
+then 
+    echo "Usage : $0 <storage account name>" 
+    echo " You will need to set your subscription for this script to work :\n as accountset --subscription <subscription id>"
+    exit
+fi
+
+echo $1
+
+IpList=$(az storage account network-rule list --account-name $1 | jq '.ipRules | .[] | .ipAddressOrRange' | sed 's/\"//g')
+
+Annon=$(az storage account show --name $1 --query allowBlobPublicAccess)
+
+Firew=$(az storage account show --name $1 | jq .networkRuleSet.defaultAction | sed 's/\"//g')
+
+echo Anonymous Access : $Annon
+echo SA Firewall : $Firew
+
+if [[ $Annon == 'true' ]]
+then 
+  echo "Setting Anonymous to false" | tee -a ${logFile}
+  az storage account update --allow-blob-public-access false --name $1 >> ${logFile} 2>> ${errLog}
+  Annon=$(az storage account show --name $1 --query allowBlobPublicAccess)
+  echo Anonymous Access : $Annon
+fi
+
+if [[ $Firew == "Allow" ]]
+then 
+   echo Change SA Firewall : $Firew | tee -a ${logFile}
+   echo -n "Are you sure? (Y or N): "
+    read -k 1 -r REPLY
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]
+    then
+      echo "proceeding"
+      az storage account update --name $1 --default-action Deny >> ${logFile} 2>> ${errLog}
+      Firew=$(az storage account show --name $1 | jq .networkRuleSet.defaultAction | sed 's/\"//g')
+      echo SA Firewall : $Firew | tee -a ${logFile}
+    fi
+fi
+
+
+for i in $(echo $IpList)
+do
+    echo Removing IP $i | tee -a  ${logFile}
+    az storage account network-rule remove --account-name $1 --ip-address $i >> ${logFile} 2>> ${errLog}
+done
+
+
